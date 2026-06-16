@@ -1,0 +1,29 @@
+{
+  "name": "fifa-show",
+  "version": "0.1.0",
+  "description": "Windows always-on-top FIFA World Cup score floating window.",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test:provider": "node scripts/verify-provider.js",
+    "package:win": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "local.fifa-show",
+    "productName": "FIFA Show",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  },
+  "devDependencies": {
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3"
+  }
+}

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FIFA Show</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="widget" id="widget">
+      <header class="topbar">
+        <div class="nav-group">
+          <button class="icon-button" id="navPrev" type="button" title="Previous page">&lsaquo;</button>
+          <button class="title-button" id="titleButton" type="button" title="Back to default scores">
+            <span class="live-dot" id="liveDot"></span>
+            <span id="viewTitle">&#19990;&#30028;&#26479;</span>
+          </button>
+          <button class="icon-button" id="navNext" type="button" title="Next page">&rsaquo;</button>
+        </div>
+
+        <div class="mode-tabs">
+          <button class="tab-button" data-view="scores" type="button" title="Scores">&#36187;</button>
+          <button class="tab-button" data-view="favorites" type="button" title="Favorites">&#9733;</button>
+          <button class="tab-button" data-view="stats" type="button" title="Stats">&#27036;</button>
+        </div>
+
+        <div class="meta" id="meta">&#21152;&#36733;&#20013;</div>
+      </header>
+
+      <section class="message hidden" id="message"></section>
+      <section class="content" id="content" aria-live="polite"></section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
