@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('fifaShow', {
   refreshMatches: (options) => ipcRenderer.invoke('matches:refresh', options),
   refreshStats: (options) => ipcRenderer.invoke('stats:refresh', options),
+  refreshMatchDetail: (options) => ipcRenderer.invoke('match-detail:refresh', options),
   getAppState: () => ipcRenderer.invoke('app:get-state'),
   showContextMenu: () => ipcRenderer.send('app:show-context-menu'),
   onRefreshCommand: (callback) => {

@@ -26,6 +26,8 @@ button {
 }
 
 .widget {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -42,6 +44,7 @@ button {
 
 .topbar {
   display: grid;
+  flex: 0 0 30px;
   grid-template-columns: minmax(116px, 1fr) auto 58px;
   align-items: center;
   height: 30px;
@@ -157,6 +160,7 @@ button {
 }
 
 .message {
+  flex: 0 0 17px;
   height: 17px;
   padding: 2px 10px 0;
   overflow: hidden;
@@ -171,10 +175,34 @@ button {
 }
 
 .content {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: 3px 7px 5px;
   gap: 1px;
+  overflow: hidden;
+}
+
+.content.scrollable {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.26) transparent;
+  -webkit-app-region: no-drag;
+}
+
+.content.scrollable::-webkit-scrollbar {
+  width: 5px;
+}
+
+.content.scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content.scrollable::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
 }
 
 .match-row {
@@ -408,7 +436,53 @@ button {
   white-space: nowrap;
 }
 
+.match-event-row {
+  display: grid;
+  grid-template-columns: 39px 34px minmax(0, 1fr);
+  align-items: center;
+  height: 17px;
+  min-height: 17px;
+  gap: 4px;
+  border-radius: 5px;
+  -webkit-app-region: no-drag;
+}
+
+.event-minute {
+  overflow: hidden;
+  color: #ffd166;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-kind {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.match-event-row.goal .event-kind {
+  color: #20d17d;
+  font-weight: 700;
+}
+
+.match-event-row.yellow-card .event-kind {
+  color: #ffd166;
+}
+
+.match-event-row.red-card .event-kind {
+  color: #ff6b6b;
+}
+
+.event-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .compact .topbar {
+  flex-basis: 26px;
   grid-template-columns: minmax(102px, 1fr) auto 44px;
   height: 26px;
 }
@@ -432,4 +506,10 @@ button {
 .compact .stats-subtab,
 .compact .prediction-button {
   height: 16px;
+}
+
+.compact .match-event-row {
+  grid-template-columns: 34px 30px minmax(0, 1fr);
+  height: 16px;
+  min-height: 16px;
 }

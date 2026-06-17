@@ -2,10 +2,12 @@ const path = require('node:path');
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const { MatchService } = require('./services/matchService');
 const { StatsService } = require('./services/statsService');
+const { MatchDetailService } = require('./services/matchDetailService');
 
 let mainWindow;
 let matchService;
 let statsService;
+let matchDetailService;
 let compactMode = false;
 
 function createWindow() {
@@ -43,11 +45,11 @@ function createWindow() {
 function popupContextMenu() {
   const menu = Menu.buildFromTemplate([
     {
-      label: '刷新',
+      label: '\u5237\u65b0',
       click: () => mainWindow?.webContents.send('command:refresh')
     },
     {
-      label: compactMode ? '退出紧凑模式' : '切换紧凑模式',
+      label: compactMode ? '\u9000\u51fa\u7d27\u51d1\u6a21\u5f0f' : '\u5207\u6362\u7d27\u51d1\u6a21\u5f0f',
       click: () => {
         compactMode = !compactMode;
         mainWindow?.setSize(compactMode ? 320 : 360, compactMode ? 104 : 160);
@@ -56,7 +58,7 @@ function popupContextMenu() {
     },
     { type: 'separator' },
     {
-      label: '退出',
+      label: '\u9000\u51fa',
       click: () => app.quit()
     }
   ]);
@@ -68,6 +70,7 @@ app.whenReady().then(() => {
   const cacheDir = path.join(app.getPath('userData'), 'cache');
   matchService = new MatchService({ cacheDir });
   statsService = new StatsService({ cacheDir, matchService });
+  matchDetailService = new MatchDetailService({ cacheDir });
 
   ipcMain.handle('matches:refresh', (_event, options = {}) => {
     return matchService.getMatches(options);
@@ -75,6 +78,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('stats:refresh', (_event, options = {}) => {
     return statsService.getStats(options);
+  });
+
+  ipcMain.handle('match-detail:refresh', (_event, options = {}) => {
+    return matchDetailService.getMatchDetail(options);
   });
 
   ipcMain.handle('app:get-state', () => ({

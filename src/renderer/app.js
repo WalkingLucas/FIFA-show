@@ -1,5 +1,6 @@
 const IDLE_REFRESH_INTERVAL_MS = 60 * 60_000;
 const LIVE_REFRESH_INTERVAL_MS = 10 * 60_000;
+const MATCH_DETAIL_REFRESH_INTERVAL_MS = 60_000;
 const FAVORITES_KEY = 'fifa-show:favorites:v2';
 const PREDICTIONS_KEY = 'fifa-show:predictions:v1';
 
@@ -18,9 +19,12 @@ const TEXT = {
   refreshing: '\u5237\u65b0\u4e2d',
   refreshFailed: '\u5237\u65b0\u5931\u8d25',
   statsRefreshFailed: '\u699c\u5355\u5237\u65b0\u5931\u8d25',
+  detailRefreshFailed: '\u8be6\u60c5\u5237\u65b0\u5931\u8d25',
   noMatches: '\u6682\u65e0\u6bd4\u8d5b\u6570\u636e',
   noStats: '\u6682\u65e0\u699c\u5355\u6570\u636e',
+  noMatchEvents: '\u6682\u65e0\u8be6\u60c5\u4e8b\u4ef6',
   statsLoading: '\u699c\u5355\u8bfb\u53d6\u4e2d',
+  detailLoading: '\u8be6\u60c5\u8bfb\u53d6\u4e2d',
   noFavorites: '\u8fd8\u6ca1\u6709\u6536\u85cf\u7403\u961f\uff0c\u70b9\u6bd4\u8d5b\u53f3\u4fa7\u661f\u6807\u5373\u53ef',
   selectTeam: '\u8bf7\u9009\u62e9\u7403\u961f',
   beijingTime: '\u5317\u4eac\u65f6\u95f4',
@@ -32,6 +36,8 @@ const TEXT = {
   unfavorite: '\u53d6\u6d88\u6536\u85cf',
   favoriteBoth: '\u6536\u85cf\u53cc\u65b9\u5e76\u67e5\u770b\u6218\u7ee9',
   unfavoriteBoth: '\u53d6\u6d88\u6536\u85cf\u53cc\u65b9\u5e76\u67e5\u770b\u6536\u85cf\u9875',
+  detail: '\u8be6\u60c5',
+  live: '\u76f4\u64ad',
   noSummaryStats: 'ESPN \u6682\u672a\u8fd4\u56de\u53ef\u6c47\u603b\u699c\u5355',
   nextMatch: '\u4e0b\u4e00\u573a',
   homeWin: '\u4e3b\u80dc',
@@ -41,13 +47,18 @@ const TEXT = {
   predictionOpen: '\u5c1a\u672a\u9884\u6d4b',
   predictionSettled: '\u5df2\u7ed3\u7b97',
   predictionPending: '\u672a\u5f00\u8d5b',
+  predictionWaiting: '\u672a\u7ed3\u7b97',
   correct: '\u731c\u4e2d',
   wrong: '\u672a\u4e2d',
   accuracy: '\u547d\u4e2d\u7387',
   settled: '\u7ed3\u7b97',
   predicted: '\u5df2\u9884\u6d4b',
+  goal: '\u8fdb\u7403',
+  ownGoal: '\u4e4c\u9f99',
   scorer: '\u8fdb\u7403',
   assist: '\u52a9\u653b',
+  assistBy: '\u52a9\u653b',
+  substitution: '\u6362\u4eba',
   discipline: '\u7eaa\u5f8b',
   fun: '\u8da3\u5473',
   predict: '\u9884\u6d4b',
@@ -61,6 +72,9 @@ const TEXT = {
 };
 
 let refreshTimerId = null;
+let matchDetailTimerId = null;
+let matchDetailInFlightId = null;
+let contentScrollKey = '';
 
 const state = {
   view: 'scores',
@@ -70,16 +84,19 @@ const state = {
   selectedMatch: null,
   matches: [],
   stats: null,
+  matchDetails: {},
   source: '',
   updatedAt: null,
   stale: false,
   error: null,
   statsError: null,
+  matchDetailError: null,
   favorites: loadSet(FAVORITES_KEY),
   predictions: loadObject(PREDICTIONS_KEY),
   compactMode: false,
   refreshing: false,
-  statsLoading: false
+  statsLoading: false,
+  matchDetailLoading: false
 };
 
 const elements = {
@@ -147,6 +164,34 @@ function scheduleNextAutoRefresh() {
   }, nextRefreshIntervalMs());
 }
 
+function clearMatchDetailTimer() {
+  if (matchDetailTimerId) {
+    clearTimeout(matchDetailTimerId);
+    matchDetailTimerId = null;
+  }
+}
+
+function currentSelectedMatch() {
+  if (!state.selectedMatch) {
+    return null;
+  }
+
+  return state.matches.find((item) => item.id === state.selectedMatch.id) || state.selectedMatch;
+}
+
+function scheduleMatchDetailRefresh() {
+  clearMatchDetailTimer();
+  const match = currentSelectedMatch();
+
+  if (state.view !== 'match' || match?.status !== 'live') {
+    return;
+  }
+
+  matchDetailTimerId = setTimeout(() => {
+    refreshMatchDetail(match, { force: true, silent: true });
+  }, MATCH_DETAIL_REFRESH_INTERVAL_MS);
+}
+
 function teamKeys(team) {
   return [
     team?.id,
@@ -197,19 +242,19 @@ function toggleFavoriteMatch(match) {
   render();
 }
 
-function statusRank(match) {
-  return isFavoriteMatch(match) ? -1 : 0;
+function byTimeAsc(a, b) {
+  return new Date(a.startTimeUtc) - new Date(b.startTimeUtc);
 }
 
-function byFavoriteThenTimeAsc(a, b) {
-  return statusRank(a) - statusRank(b) || new Date(a.startTimeUtc) - new Date(b.startTimeUtc);
-}
-
-function byFavoriteThenTimeDesc(a, b) {
-  return statusRank(a) - statusRank(b) || new Date(b.startTimeUtc) - new Date(a.startTimeUtc);
+function byTimeDesc(a, b) {
+  return new Date(b.startTimeUtc) - new Date(a.startTimeUtc);
 }
 
 function visibleMessageText() {
+  if (state.view === 'match') {
+    return state.matchDetailError || state.error;
+  }
+
   return state.view === 'stats'
     ? state.statsError || state.error
     : state.error;
@@ -223,14 +268,14 @@ function desiredRows(extraRows = 0) {
 function finishedMatches() {
   return state.matches
     .filter((match) => match.status === 'finished')
-    .sort(byFavoriteThenTimeDesc);
+    .sort(byTimeDesc);
 }
 
 function upcomingMatches() {
   const now = Date.now();
   return state.matches
     .filter((match) => match.status === 'scheduled' && new Date(match.startTimeUtc).getTime() >= now - 5 * 60_000)
-    .sort(byFavoriteThenTimeAsc);
+    .sort(byTimeAsc);
 }
 
 function scorePageLimits() {
@@ -278,10 +323,10 @@ function selectScoreMatches() {
   const now = Date.now();
   const live = state.matches
     .filter((match) => match.status === 'live')
-    .sort(byFavoriteThenTimeAsc);
+    .sort(byTimeAsc);
   const finished = state.matches
     .filter((match) => match.status === 'finished' && new Date(match.startTimeUtc).getTime() <= now)
-    .sort(byFavoriteThenTimeDesc)
+    .sort(byTimeDesc)
     .slice(0, 2);
   const upcoming = upcomingMatches().slice(0, 3);
 
@@ -323,26 +368,42 @@ function matchLabel(match) {
 }
 
 function openTeam(team) {
+  clearMatchDetailTimer();
   state.selectedTeam = team;
   state.selectedMatch = null;
   state.view = 'team';
   state.pageOffset = 0;
+  state.matchDetailError = null;
+  state.matchDetailLoading = false;
   render();
 }
 
 function openMatch(match) {
+  clearMatchDetailTimer();
   state.selectedMatch = match;
   state.selectedTeam = null;
   state.view = 'match';
   state.pageOffset = 0;
+  state.matchDetailError = null;
+  state.matchDetailLoading = false;
   render();
+
+  if (match.status !== 'scheduled') {
+    refreshMatchDetail(match, { force: match.status === 'live' });
+  }
 }
 
 function setView(view) {
+  if (view !== 'match') {
+    clearMatchDetailTimer();
+  }
+
   state.view = view;
   state.pageOffset = 0;
   state.selectedMatch = null;
   state.selectedTeam = null;
+  state.matchDetailError = null;
+  state.matchDetailLoading = false;
 
   if (view === 'stats' && !state.stats && !state.statsLoading) {
     refreshStats({ force: false });
@@ -353,11 +414,31 @@ function setView(view) {
 
 function render() {
   clampPageOffset();
+  const previousScrollKey = contentScrollKey;
+  const previousScrollTop = elements.content.scrollTop;
   elements.widget.classList.toggle('compact', state.compactMode);
   elements.liveDot.classList.toggle('active', hasLiveMatches());
+  elements.content.classList.toggle('scrollable', isScrollableContent());
   renderTopbar();
   renderMessage();
   elements.content.replaceChildren(...renderContent());
+
+  contentScrollKey = getContentScrollKey();
+  if (previousScrollKey === contentScrollKey) {
+    elements.content.scrollTop = previousScrollTop;
+  } else {
+    elements.content.scrollTop = 0;
+  }
+}
+
+function isScrollableContent() {
+  const match = currentSelectedMatch();
+  return state.view === 'match' && match?.status !== 'scheduled';
+}
+
+function getContentScrollKey() {
+  const match = currentSelectedMatch();
+  return match ? `${state.view}:${match.id}` : state.view;
 }
 
 function renderTopbar() {
@@ -376,7 +457,7 @@ function renderTopbar() {
     favorites: TEXT.favorites,
     stats: TEXT.stats,
     team: state.selectedTeam ? teamLabel(state.selectedTeam) : TEXT.team,
-    match: TEXT.match
+    match: state.selectedMatch?.status === 'scheduled' ? TEXT.predict : TEXT.detail
   };
 
   elements.viewTitle.textContent = titles[state.view] || TEXT.worldCup;
@@ -717,9 +798,7 @@ function predictionSummary() {
 }
 
 function renderMatchView() {
-  const match = state.selectedMatch
-    ? state.matches.find((item) => item.id === state.selectedMatch.id) || state.selectedMatch
-    : null;
+  const match = currentSelectedMatch();
 
   if (!match) {
     return [emptyNode(TEXT.noMatches)];
@@ -752,14 +831,115 @@ function renderMatchView() {
     rows.push(buttons);
     rows.push(noteNode(prediction ? `${TEXT.predictionSaved}: ${predictionLabel(prediction.pick, match)}` : TEXT.predictionOpen));
   } else {
-    const label = prediction ? predictionLabel(prediction.pick, match) : TEXT.predictionOpen;
-    const status = outcome && prediction
-      ? prediction.pick === outcome ? TEXT.correct : TEXT.wrong
-      : TEXT.predictionPending;
-    rows.push(detailLine(label, status));
+    const detailRows = renderMatchDetailRows(match);
+
+    if (detailRows.length > 0) {
+      rows.push(...detailRows);
+    } else if (state.matchDetailLoading) {
+      rows.push(noteNode(TEXT.detailLoading));
+    } else {
+      rows.push(noteNode(TEXT.noMatchEvents));
+    }
+
+    if (prediction && rows.length < desiredRows()) {
+      const status = outcome
+        ? prediction.pick === outcome ? TEXT.correct : TEXT.wrong
+        : TEXT.predictionWaiting;
+      const prefix = outcome ? TEXT.predictionSettled : TEXT.predictionSaved;
+      rows.push(noteNode(`${prefix}: ${predictionLabel(prediction.pick, match)} ${status}`));
+    }
   }
 
-  return rows.slice(0, desiredRows());
+  return match.status === 'scheduled' ? rows.slice(0, desiredRows()) : rows;
+}
+
+function renderMatchDetailRows(match) {
+  const detail = state.matchDetails[match.id];
+  if (!detail) {
+    return [];
+  }
+
+  const events = selectMatchDetailEvents(match, detail);
+  return events
+    .map((event) => matchEventRow(event));
+}
+
+function selectMatchDetailEvents(match, detail) {
+  const majorEvents = Array.isArray(detail.events) ? detail.events : [];
+  const commentary = Array.isArray(detail.commentary) ? detail.commentary : [];
+  return [...majorEvents, ...commentary].sort((a, b) => eventSortValue(b) - eventSortValue(a));
+}
+
+function eventSortValue(event) {
+  const wallclockMs = Date.parse(event.wallclock || '');
+  if (Number.isFinite(wallclockMs)) {
+    return wallclockMs;
+  }
+
+  return Number(event.order || 0);
+}
+
+function matchEventRow(event) {
+  const row = document.createElement('div');
+  row.className = `match-event-row ${event.kind || ''}`;
+
+  const minute = document.createElement('span');
+  minute.className = 'event-minute';
+  minute.textContent = event.minute || '--';
+
+  const kind = document.createElement('span');
+  kind.className = 'event-kind';
+  kind.textContent = eventKindLabel(event);
+
+  const text = document.createElement('span');
+  text.className = 'event-text';
+  text.textContent = eventText(event);
+  text.title = event.text || text.textContent;
+
+  row.append(minute, kind, text);
+  return row;
+}
+
+function eventKindLabel(event) {
+  if (event.kind === 'goal') {
+    return event.ownGoal ? TEXT.ownGoal : TEXT.goal;
+  }
+
+  if (event.kind === 'yellow-card') {
+    return TEXT.yellow;
+  }
+
+  if (event.kind === 'red-card') {
+    return TEXT.red;
+  }
+
+  if (event.kind === 'substitution') {
+    return TEXT.substitution;
+  }
+
+  return TEXT.live;
+}
+
+function eventText(event) {
+  if (event.kind === 'goal') {
+    const scorer = event.player || event.shortText || TEXT.goal;
+    return event.assist
+      ? `${scorer} · ${TEXT.assistBy} ${event.assist}`
+      : scorer;
+  }
+
+  if (event.kind === 'yellow-card' || event.kind === 'red-card') {
+    return event.player || event.shortText || event.text || eventKindLabel(event);
+  }
+
+  if (event.kind === 'substitution') {
+    if (event.playerIn || event.playerOut) {
+      return `${event.playerIn || '?'} ← ${event.playerOut || '?'}`;
+    }
+    return event.shortText || event.text || TEXT.substitution;
+  }
+
+  return event.shortText || event.text || TEXT.live;
 }
 
 function detailLine(left, right) {
@@ -916,6 +1096,10 @@ async function refreshMatches(options = {}) {
     state.updatedAt = result.updatedAt || null;
     state.stale = Boolean(result.stale);
     state.error = result.error || null;
+
+    if (state.selectedMatch) {
+      state.selectedMatch = state.matches.find((match) => match.id === state.selectedMatch.id) || state.selectedMatch;
+    }
   } catch (error) {
     state.stale = true;
     state.error = `${TEXT.refreshFailed}: ${error.message}`;
@@ -923,6 +1107,11 @@ async function refreshMatches(options = {}) {
     state.refreshing = false;
     render();
     scheduleNextAutoRefresh();
+
+    const match = currentSelectedMatch();
+    if (state.view === 'match' && match?.status !== 'scheduled') {
+      refreshMatchDetail(match, { force: match.status === 'live', silent: true });
+    }
   }
 }
 
@@ -944,6 +1133,54 @@ async function refreshStats(options = {}) {
   } finally {
     state.statsLoading = false;
     render();
+  }
+}
+
+async function refreshMatchDetail(match, options = {}) {
+  if (!match || match.status === 'scheduled') {
+    clearMatchDetailTimer();
+    return;
+  }
+
+  if (matchDetailInFlightId === match.id) {
+    return;
+  }
+
+  const hasCachedDetail = Boolean(state.matchDetails[match.id]);
+  const silent = Boolean(options.silent || hasCachedDetail);
+  matchDetailInFlightId = match.id;
+
+  if (!silent) {
+    state.matchDetailLoading = true;
+    state.matchDetailError = null;
+    render();
+  }
+
+  try {
+    const result = await window.fifaShow.refreshMatchDetail({
+      eventId: match.id,
+      force: Boolean(options.force),
+      live: match.status === 'live'
+    });
+
+    state.matchDetails[match.id] = result;
+    if (currentSelectedMatch()?.id === match.id) {
+      state.matchDetailError = result.error || null;
+    }
+  } catch (error) {
+    if (currentSelectedMatch()?.id === match.id) {
+      state.matchDetailError = `${TEXT.detailRefreshFailed}: ${error.message}`;
+    }
+  } finally {
+    if (matchDetailInFlightId === match.id) {
+      matchDetailInFlightId = null;
+    }
+
+    if (currentSelectedMatch()?.id === match.id) {
+      state.matchDetailLoading = false;
+      render();
+      scheduleMatchDetailRefresh();
+    }
   }
 }
 
@@ -981,6 +1218,10 @@ window.fifaShow.onRefreshCommand(() => {
   refreshMatches({ force: true });
   if (state.view === 'stats') {
     refreshStats({ force: true });
+  }
+  const match = currentSelectedMatch();
+  if (state.view === 'match' && match?.status !== 'scheduled') {
+    refreshMatchDetail(match, { force: true });
   }
 });
 
