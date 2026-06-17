@@ -1,6 +1,6 @@
 {
   "name": "fifa-show",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Windows always-on-top FIFA World Cup score floating window.",
   "main": "src/main.js",
   "type": "commonjs",
