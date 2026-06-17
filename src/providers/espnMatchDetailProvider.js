@@ -189,6 +189,46 @@ function normalizeCommentary(item, index) {
   };
 }
 
+function parseScore(value) {
+  const score = Number.parseInt(value, 10);
+  return Number.isFinite(score) ? score : null;
+}
+
+function mapStatus(competition) {
+  const type = competition.status?.type || {};
+  const state = type.state;
+
+  if (state === 'in') {
+    return 'live';
+  }
+
+  if (state === 'post') {
+    return 'finished';
+  }
+
+  if (state === 'pre') {
+    return 'scheduled';
+  }
+
+  return null;
+}
+
+function normalizeMatchSnapshot(data) {
+  const competition = data.header?.competitions?.[0] || {};
+  const competitors = competition.competitors || [];
+  const home = competitors.find((competitor) => competitor.homeAway === 'home');
+  const away = competitors.find((competitor) => competitor.homeAway === 'away');
+  const type = competition.status?.type || {};
+
+  return {
+    status: mapStatus(competition),
+    statusText: type.shortDetail || type.detail || type.description || null,
+    clock: competition.status?.displayClock || null,
+    homeScore: parseScore(home?.score),
+    awayScore: parseScore(away?.score)
+  };
+}
+
 function normalizeSummary(data, eventId, sourceUrl) {
   const keyEvents = (data.keyEvents || [])
     .map((event, index) => normalizeKeyEvent(event, index))
@@ -208,6 +248,7 @@ function normalizeSummary(data, eventId, sourceUrl) {
     eventId: String(eventId),
     updatedAt: new Date().toISOString(),
     statusText: data.header?.competitions?.[0]?.status?.type?.shortDetail || null,
+    match: normalizeMatchSnapshot(data),
     events: keyEvents,
     commentary
   };

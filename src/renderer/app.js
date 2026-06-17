@@ -1,6 +1,7 @@
 const IDLE_REFRESH_INTERVAL_MS = 60 * 60_000;
 const LIVE_REFRESH_INTERVAL_MS = 10 * 60_000;
 const MATCH_DETAIL_REFRESH_INTERVAL_MS = 60_000;
+const LIVE_GOAL_WATCH_INTERVAL_MS = 60_000;
 const FAVORITES_KEY = 'fifa-show:favorites:v2';
 const PREDICTIONS_KEY = 'fifa-show:predictions:v1';
 
@@ -74,7 +75,10 @@ const TEXT = {
 let refreshTimerId = null;
 let matchDetailTimerId = null;
 let matchDetailInFlightId = null;
+let liveGoalWatchTimerId = null;
+let liveGoalWatchInFlight = false;
 let contentScrollKey = '';
+const liveGoalKeysByMatchId = new Map();
 
 const state = {
   view: 'scores',
@@ -190,6 +194,26 @@ function scheduleMatchDetailRefresh() {
   matchDetailTimerId = setTimeout(() => {
     refreshMatchDetail(match, { force: true, silent: true });
   }, MATCH_DETAIL_REFRESH_INTERVAL_MS);
+}
+
+function clearLiveGoalWatchTimer() {
+  if (liveGoalWatchTimerId) {
+    clearTimeout(liveGoalWatchTimerId);
+    liveGoalWatchTimerId = null;
+  }
+}
+
+function scheduleLiveGoalWatch() {
+  clearLiveGoalWatchTimer();
+
+  if (!hasLiveMatches()) {
+    liveGoalKeysByMatchId.clear();
+    return;
+  }
+
+  liveGoalWatchTimerId = setTimeout(() => {
+    watchLiveGoals();
+  }, LIVE_GOAL_WATCH_INTERVAL_MS);
 }
 
 function teamKeys(team) {
@@ -1081,6 +1105,124 @@ function emptyNode(text) {
   return node;
 }
 
+function goalKeys(detail) {
+  return new Set((detail?.events || [])
+    .filter((event) => event.kind === 'goal')
+    .map((event) => event.id || `${event.minute}|${event.player || ''}|${event.text || ''}`));
+}
+
+function rememberLiveGoals(matchId, detail) {
+  const nextKeys = goalKeys(detail);
+  const previousKeys = liveGoalKeysByMatchId.get(matchId);
+  liveGoalKeysByMatchId.set(matchId, nextKeys);
+
+  if (!previousKeys) {
+    return false;
+  }
+
+  return [...nextKeys].some((key) => !previousKeys.has(key));
+}
+
+function applyDetailMatchSnapshot(matchId, detail) {
+  const snapshot = detail?.match;
+  if (!snapshot) {
+    return false;
+  }
+
+  let changed = false;
+  const applyToMatch = (match) => {
+    if (match.id !== matchId) {
+      return match;
+    }
+
+    const next = {
+      ...match,
+      homeTeam: { ...match.homeTeam },
+      awayTeam: { ...match.awayTeam }
+    };
+
+    if (Number.isFinite(snapshot.homeScore) && next.homeTeam.score !== snapshot.homeScore) {
+      next.homeTeam.score = snapshot.homeScore;
+      changed = true;
+    }
+
+    if (Number.isFinite(snapshot.awayScore) && next.awayTeam.score !== snapshot.awayScore) {
+      next.awayTeam.score = snapshot.awayScore;
+      changed = true;
+    }
+
+    for (const [field, value] of [
+      ['status', snapshot.status],
+      ['statusText', snapshot.statusText],
+      ['clock', snapshot.clock]
+    ]) {
+      if (value && next[field] !== value) {
+        next[field] = value;
+        changed = true;
+      }
+    }
+
+    return changed ? next : match;
+  };
+
+  state.matches = state.matches.map(applyToMatch);
+  if (state.selectedMatch?.id === matchId) {
+    state.selectedMatch = applyToMatch(state.selectedMatch);
+  }
+
+  return changed;
+}
+
+async function watchLiveGoals() {
+  if (liveGoalWatchInFlight || !hasLiveMatches()) {
+    scheduleLiveGoalWatch();
+    return;
+  }
+
+  liveGoalWatchInFlight = true;
+  let scoreChanged = false;
+  let shouldRefreshMatches = false;
+
+  try {
+    const liveMatches = state.matches.filter((match) => match.status === 'live');
+
+    for (const match of liveMatches) {
+      try {
+        const result = await window.fifaShow.refreshMatchDetail({
+          eventId: match.id,
+          force: false,
+          live: true
+        });
+
+        state.matchDetails[match.id] = result;
+        scoreChanged = applyDetailMatchSnapshot(match.id, result) || scoreChanged;
+
+        if (!result.stale && rememberLiveGoals(match.id, result)) {
+          shouldRefreshMatches = true;
+        }
+      } catch {
+        // Goal watching is best-effort; the normal cached scoreboard remains visible.
+      }
+    }
+  } finally {
+    liveGoalWatchInFlight = false;
+  }
+
+  if (shouldRefreshMatches) {
+    if (state.refreshing) {
+      scheduleLiveGoalWatch();
+    } else {
+      refreshMatches({ force: true, auto: true });
+    }
+    return;
+  }
+
+  if (scoreChanged) {
+    render();
+  }
+  scheduleLiveGoalWatch();
+}
+
 async function refreshMatches(options = {}) {
   if (state.refreshing) {
     return;
@@ -1107,6 +1249,7 @@ async function refreshMatches(options = {}) {
     state.refreshing = false;
     render();
     scheduleNextAutoRefresh();
+    scheduleLiveGoalWatch();
 
     const match = currentSelectedMatch();
     if (state.view === 'match' && match?.status !== 'scheduled') {
@@ -1164,6 +1307,11 @@ async function refreshMatchDetail(match, options = {}) {
     });
 
     state.matchDetails[match.id] = result;
+    applyDetailMatchSnapshot(match.id, result);
+    if (match.status === 'live' && !result.stale && rememberLiveGoals(match.id, result)) {
+      refreshMatches({ force: true, auto: true });
+    }
+
     if (currentSelectedMatch()?.id === match.id) {
       state.matchDetailError = result.error || null;
     }
